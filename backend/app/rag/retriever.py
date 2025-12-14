@@ -78,7 +78,10 @@ class VectorStore:
         faiss.normalize_L2(query)
         
         # Search
-        k = min(top_k, self.index.ntotal)
+        if top_k is None or top_k <= 0:
+            k = self.index.ntotal
+        else:
+            k = min(top_k, self.index.ntotal)
         distances, indices = self.index.search(query, k)
         
         # Return results

@@ -38,6 +38,36 @@ class Database:
             raise
         finally:
             conn.close()
+    
+    def _migrate_add_last_used(self):
+        """Add last_used column to existing sessions table if not present."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute("ALTER TABLE sessions ADD COLUMN last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+                conn.commit()
+            except sqlite3.OperationalError:
+                # Column already exists
+                pass
+            except Exception as e:
+                print(f"last_used migration error: {e}")
+
+    def _ensure_uploads_table(self):
+        """Create uploads table if missing."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS uploads (
+                    upload_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    category TEXT DEFAULT 'notes',
+                    chunks_count INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(session_id) REFERENCES sessions(session_id)
+                )
+            """)
+            conn.commit()
 
     def init_db(self):
         """Initialize database and create tables if they don't exist."""
@@ -48,12 +78,17 @@ class Database:
                     session_id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     category_map TEXT DEFAULT 'notes',
                     vector_index_path TEXT,
                     chat_history_path TEXT
                 )
             """)
             conn.commit()
+        
+        # Add last_used column if it doesn't exist (migration)
+        self._migrate_add_last_used()
+        self._ensure_uploads_table()
 
     def create_session(
         self,
@@ -89,6 +124,73 @@ class Database:
 
         return self.get_session(session_id)
 
+    def add_upload(
+        self,
+        upload_id: str,
+        session_id: str,
+        filename: str,
+        category: str = "notes",
+        chunks_count: int = 0,
+    ) -> Dict:
+        """Record an uploaded file for a session."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO uploads (upload_id, session_id, filename, category, chunks_count)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (upload_id, session_id, filename, category, chunks_count),
+                )
+                conn.commit()
+            return self.get_upload(upload_id)
+        except sqlite3.OperationalError as e:
+            if "no such table: uploads" in str(e):
+                self._ensure_uploads_table()
+                with self.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        """
+                        INSERT INTO uploads (upload_id, session_id, filename, category, chunks_count)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (upload_id, session_id, filename, category, chunks_count),
+                    )
+                    conn.commit()
+                return self.get_upload(upload_id)
+            raise
+
+    def get_upload(self, upload_id: str) -> Optional[Dict]:
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM uploads WHERE upload_id = ?", (upload_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def get_uploads_for_session(self, session_id: str) -> List[Dict]:
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT * FROM uploads WHERE session_id = ? ORDER BY created_at DESC",
+                    (session_id,),
+                )
+                rows = cursor.fetchall()
+                return [dict(r) for r in rows]
+        except sqlite3.OperationalError as e:
+            if "no such table: uploads" in str(e):
+                self._ensure_uploads_table()
+                with self.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT * FROM uploads WHERE session_id = ? ORDER BY created_at DESC",
+                        (session_id,),
+                    )
+                    rows = cursor.fetchall()
+                    return [dict(r) for r in rows]
+            raise
+
     def get_session(self, session_id: str) -> Optional[Dict]:
         """
         Get session by ID.
@@ -117,11 +219,42 @@ class Database:
         Returns:
             List of session dictionaries
         """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM sessions ORDER BY last_used DESC")
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+        except sqlite3.OperationalError as e:
+            # Handle legacy DBs missing last_used column
+            if "no such column: last_used" in str(e):
+                self._migrate_add_last_used()
+                with self.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT * FROM sessions ORDER BY created_at DESC")
+                    rows = cursor.fetchall()
+                    return [dict(row) for row in rows]
+            raise
+    
+    def update_last_used(self, session_id: str) -> Optional[Dict]:
+        """
+        Update the last_used timestamp for a session.
+
+        Args:
+            session_id: Session identifier
+
+        Returns:
+            Updated session or None
+        """
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM sessions ORDER BY created_at DESC")
-            rows = cursor.fetchall()
-            return [dict(row) for row in rows]
+            cursor.execute(
+                "UPDATE sessions SET last_used = CURRENT_TIMESTAMP WHERE session_id = ?",
+                (session_id,)
+            )
+            conn.commit()
+        
+        return self.get_session(session_id)
 
     def update_session(
         self,
@@ -240,14 +373,27 @@ class Database:
         Returns:
             List of session dictionaries
         """
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT * FROM sessions WHERE category_map = ? ORDER BY created_at DESC",
-                (category_map,),
-            )
-            rows = cursor.fetchall()
-            return [dict(row) for row in rows]
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT * FROM sessions WHERE category_map = ? ORDER BY last_used DESC",
+                    (category_map,),
+                )
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+        except sqlite3.OperationalError as e:
+            if "no such column: last_used" in str(e):
+                self._migrate_add_last_used()
+                with self.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT * FROM sessions WHERE category_map = ? ORDER BY created_at DESC",
+                        (category_map,),
+                    )
+                    rows = cursor.fetchall()
+                    return [dict(row) for row in rows]
+            raise
 
 
 # Global database instance

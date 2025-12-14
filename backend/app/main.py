@@ -1,11 +1,13 @@
 """Main application entry point using FastAPI."""
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import uuid
 import os
+import json
 from typing import Dict, List
+import torch
 
 from app.models import (
     MessageRequest,
@@ -16,6 +18,7 @@ from app.models import (
     SessionResponse,
     SessionUpdate,
     QuickActionRequest,
+    UploadRecord,
 )
 from app.rag.chat import ChatBot
 from app.config import Settings
@@ -28,6 +31,44 @@ import shutil
 chat_sessions: Dict[str, ChatBot] = {}
 settings = Settings()
 
+# Check CUDA availability on startup
+def check_gpu_availability():
+    """Check and log GPU availability."""
+    if torch.cuda.is_available():
+        print(f"✓ GPU detected: {torch.cuda.get_device_name(0)}")
+        print(f"  CUDA Version: {torch.version.cuda}")
+        print(f"  Device Count: {torch.cuda.device_count()}")
+    else:
+        print("⚠ WARNING: CUDA not available. PyTorch cannot access GPU.")
+        print("  To enable GPU support:")
+        print("    1. Verify NVIDIA GPU is installed and drivers updated")
+        print("    2. Install CUDA Toolkit (matching PyTorch version)")
+        print("    3. Reinstall PyTorch with CUDA support:")
+        print("       pip uninstall torch torchvision torchaudio")
+        print("       pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118")
+        print("       (Replace cu118 with your CUDA version: cu118, cu121, etc.)")
+
+check_gpu_availability()
+
+
+def ensure_session_paths(session: Dict) -> Dict:
+    """Ensure vector_index_path and chat_history_path exist for a session."""
+    updated = False
+    if not session.get('vector_index_path'):
+        session['vector_index_path'] = f"{settings.VECTORS_DIR}/{session['session_id']}"
+        updated = True
+    if not session.get('chat_history_path'):
+        session['chat_history_path'] = f"{settings.HISTORY_DIR}/{session['session_id']}.json"
+        updated = True
+    if updated:
+        db.update_session(
+            session_id=session['session_id'],
+            vector_index_path=session['vector_index_path'],
+            chat_history_path=session['chat_history_path'],
+        )
+        session = db.get_session(session['session_id']) or session
+    return session
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -35,6 +76,11 @@ async def lifespan(app: FastAPI):
     print("StudyRAG starting up...")
     print("Initializing database...")
     db.init_db()
+    # Ensure migrations run for legacy DBs
+    try:
+        db._migrate_add_last_used()
+    except Exception as e:
+        print(f"Migration check error: {e}")
     yield
     print("StudyRAG shutting down...")
 
@@ -100,6 +146,8 @@ async def chat(request: MessageRequest):
         if not session:
             raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
+        session = ensure_session_paths(session)
+
         # Create or get chat session with RAG enabled
         if session_id not in chat_sessions:
             chat_sessions[session_id] = ChatBot(
@@ -111,6 +159,9 @@ async def chat(request: MessageRequest):
 
         # Get response from chatbot with RAG and specified mode
         response_text = bot.chat(request.message, use_rag=True, mode=mode)
+        
+        # Update last_used timestamp
+        db.update_last_used(session_id)
 
         return MessageResponse(
             response=response_text,
@@ -127,8 +178,8 @@ async def chat(request: MessageRequest):
 @app.post("/upload", response_model=DocumentResponse, tags=["Documents"])
 async def upload_document(
     file: UploadFile = File(...),
-    session_id: str = None,
-    category: str = "notes"
+    session_id: str = Form(...),
+    category: str = Form("notes")
 ):
     """
     Upload and ingest a document for RAG processing.
@@ -159,6 +210,27 @@ async def upload_document(
         
         doc_id = str(uuid.uuid4())
         
+        # Record upload in DB
+        try:
+            db.add_upload(
+                upload_id=doc_id,
+                session_id=session_id,
+                filename=file.filename,
+                category=category,
+                chunks_count=result.get("chunks_count", 0),
+            )
+        except Exception as e:
+            print(f"Warning: failed to record upload: {e}")
+
+        # Reload in-memory vector store if session active
+        if session_id in chat_sessions:
+            bot = chat_sessions[session_id]
+            if bot.vector_store:
+                try:
+                    bot.vector_store.load()
+                except Exception as e:
+                    print(f"Warning: failed to reload vector store for session {session_id}: {e}")
+        
         return DocumentResponse(
             document_id=doc_id,
             filename=file.filename,
@@ -173,46 +245,30 @@ async def upload_document(
         raise HTTPException(status_code=500, detail=f"Upload error: {str(e)}")
 
 
-@app.post("/ingest/youtube", response_model=DocumentResponse, tags=["Documents"])
-async def ingest_youtube(
-    url: str,
-    session_id: str,
-    category: str = "notes"
-):
-    """
-    Ingest a YouTube video for RAG processing.
-    
-    - **url**: YouTube video URL
-    - **session_id**: Session to associate with
-    - **category**: Category (notes/qpapers)
-    """
-    try:
-        # Ingest the YouTube video
-        result = ingest(url, session_id, category)
-        
-        doc_id = str(uuid.uuid4())
-        
-        return DocumentResponse(
-            document_id=doc_id,
-            filename=url,
-            status="completed" if result["status"] == "success" else "failed",
-            chunks_count=result.get("chunks_count", 0),
-            message=result["message"],
-        )
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ingestion error: {str(e)}")
 
 
 @app.get("/sessions/{session_id}/history", tags=["Chat"])
 async def get_chat_history(session_id: str):
     """Get conversation history for a session."""
     try:
-        if session_id not in chat_sessions:
+        # Check if session exists in DB
+        session = db.get_session(session_id)
+        if not session:
             raise HTTPException(status_code=404, detail="Session not found")
-
-        bot = chat_sessions[session_id]
-        history = bot.get_conversation_history()
+        
+        # If session is loaded in memory, get from chat bot
+        if session_id in chat_sessions:
+            bot = chat_sessions[session_id]
+            history = bot.get_conversation_history()
+        else:
+            # Load from disk history file
+            history_file = f"{settings.HISTORY_DIR}/{session_id}.json"
+            if os.path.exists(history_file):
+                with open(history_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    history = data.get('messages', [])
+            else:
+                history = []
 
         return {
             "session_id": session_id,
@@ -299,8 +355,9 @@ async def get_session(session_id: str):
         session = db.get_session(session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
-        
-        return SessionResponse(**session)
+        # Update last_used when a session is opened/viewed
+        updated = db.update_last_used(session_id)
+        return SessionResponse(**(updated or session))
     
     except HTTPException:
         raise
@@ -390,6 +447,23 @@ async def get_sessions_by_category(category: str):
         raise HTTPException(status_code=500, detail=f"Error fetching sessions: {str(e)}")
 
 
+@app.get("/api/sessions/{session_id}/files", response_model=List[UploadRecord], tags=["Sessions"])
+async def get_session_files(session_id: str):
+    """List uploaded files for a session."""
+    try:
+        session = db.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        uploads = db.get_uploads_for_session(session_id)
+        return [UploadRecord(**u) for u in uploads]
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching files: {str(e)}")
+
+
 # Quick Action Endpoints (1-click intelligence)
 @app.post("/explain-simple", response_model=MessageResponse, tags=["Quick Actions"])
 async def explain_simple(request: QuickActionRequest):
@@ -405,6 +479,7 @@ async def explain_simple(request: QuickActionRequest):
         session = db.get_session(request.session_id)
         if not session:
             raise HTTPException(status_code=404, detail=f"Session {request.session_id} not found")
+        session = ensure_session_paths(session)
         
         # Create or get chat session
         if request.session_id not in chat_sessions:
@@ -447,6 +522,7 @@ async def important_points(request: QuickActionRequest):
         session = db.get_session(request.session_id)
         if not session:
             raise HTTPException(status_code=404, detail=f"Session {request.session_id} not found")
+        session = ensure_session_paths(session)
         
         # Create or get chat session
         if request.session_id not in chat_sessions:
@@ -489,6 +565,7 @@ async def revise_fast(request: QuickActionRequest):
         session = db.get_session(request.session_id)
         if not session:
             raise HTTPException(status_code=404, detail=f"Session {request.session_id} not found")
+        session = ensure_session_paths(session)
         
         # Create or get chat session
         if request.session_id not in chat_sessions:
@@ -531,6 +608,7 @@ async def ask_questions(request: QuickActionRequest):
         session = db.get_session(request.session_id)
         if not session:
             raise HTTPException(status_code=404, detail=f"Session {request.session_id} not found")
+        session = ensure_session_paths(session)
         
         # Create or get chat session
         if request.session_id not in chat_sessions:

@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StudyRAG - Chat</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+</head>
+<body>
+    <div class="container chat-container">
+        <header class="chat-header">
+            <div class="header-left">
+                <a href="index.html" class="btn-back">← Back</a>
+                <h1 id="sessionName">Loading...</h1>
+            </div>
+            <div class="header-buttons">
+                <button id="pdfBtn" class="btn btn-secondary">📄 Export PDF</button>
+                <button id="uploadBtn" class="btn btn-secondary">📎 Upload</button>
+                <button id="modeBtn" class="btn btn-secondary">🎯 Mode</button>
+            </div>
+        </header>
+
+        <main class="chat-main">
+            <div id="filesPanel" class="files-panel">
+                <div class="files-header">
+                    <h3>Uploaded Files</h3>
+                    <span id="filesCount" class="badge">0</span>
+                </div>
+                <div id="filesList" class="files-list">
+                    <p class="loading">No files yet.</p>
+                </div>
+            </div>
+
+            <div id="chatMessages" class="chat-messages">
+                <div class="message system">
+                    <p>Session loaded. Ready to chat!</p>
+                </div>
+            </div>
+
+            <div class="chat-input-area">
+                <div id="modeSelector" class="mode-selector" style="display: none;">
+                    <button class="mode-btn" data-mode="chat">💬 Chat</button>
+                    <button class="mode-btn" data-mode="teacher">👨‍🏫 Explain</button>
+                    <button class="mode-btn" data-mode="summary">📝 Summary</button>
+                    <button class="mode-btn" data-mode="points">📌 Points</button>
+                    <button class="mode-btn" data-mode="flashcards">🃏 Flashcards</button>
+                    <button class="mode-btn" data-mode="exam">❓ Exam Q</button>
+                </div>
+
+                <div class="input-wrapper">
+                    <input 
+                        type="text" 
+                        id="messageInput" 
+                        placeholder="Ask something..." 
+                        autocomplete="off"
+                    >
+                    <button id="sendBtn" class="btn btn-primary">Send</button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+        <div class="loader-content">
+            <div class="spinner"></div>
+            <p id="loadingText">Processing...</p>
+        </div>
+    </div>
+
+    <!-- Upload Modal -->
+    <div id="uploadModal" class="modal">
+        <div class="modal-content">
+            <span class="modal-close">&times;</span>
+            <h2>Upload Documents</h2>
+            <form id="uploadForm">
+                <div class="form-group">
+                    <label for="fileInput">Select File (PDF, DOCX, PPTX, TXT):</label>
+                    <input type="file" id="fileInput" required>
+                </div>
+                <div class="form-group">
+                    <label for="uploadCategory">Category:</label>
+                    <select id="uploadCategory">
+                        <option value="notes">Notes</option>
+                        <option value="qpapers">Question Papers</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary">Upload</button>
+                <button type="button" class="btn btn-secondary" onclick="closeUploadModal()">Cancel</button>
+            </form>
+            <div id="uploadStatus" class="upload-status"></div>
+        </div>
+    </div>
+
+    <script src="js/api.js"></script>
+    <script src="js/chat.js"></script>
+</body>
+</html>

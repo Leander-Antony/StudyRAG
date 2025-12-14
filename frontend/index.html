@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StudyRAG - Sessions</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>StudyRAG</h1>
+            <div class="header-buttons">
+                <button id="createSessionBtn" class="btn btn-primary">+ New Session</button>
+            </div>
+        </header>
+
+        <main>
+            <section id="sessionsSection">
+                <h2>Your Sessions</h2>
+                <div id="sessionsList" class="sessions-grid">
+                    <p class="loading">Loading sessions...</p>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Create Session Modal -->
+    <div id="createSessionModal" class="modal">
+        <div class="modal-content">
+            <span class="modal-close">&times;</span>
+            <h2>Create New Session</h2>
+            <form id="createSessionForm">
+                <div class="form-group">
+                    <label for="sessionName">Session Name (Subject):</label>
+                    <input type="text" id="sessionName" placeholder="e.g., Machine Learning" required>
+                </div>
+                <div class="form-group">
+                    <label for="sessionCategory">Category:</label>
+                    <select id="sessionCategory">
+                        <option value="notes">Study Notes</option>
+                        <option value="qpapers">Question Papers</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary">Create Session</button>
+                <button type="button" class="btn btn-secondary" onclick="closeCreateModal()">Cancel</button>
+            </form>
+        </div>
+    </div>
+
+    <script src="js/api.js"></script>
+    <script src="js/sessions.js"></script>
+</body>
+</html>

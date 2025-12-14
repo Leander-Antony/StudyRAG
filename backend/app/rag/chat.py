@@ -104,7 +104,8 @@ class ChatBot:
             Tuple of (formatted context string, list of source metadata)
         """
         if top_k is None:
-            top_k = settings.TOP_K_RESULTS
+            # Honor ALL_RESULTS config to retrieve the entire vector store
+            top_k = None if settings.ALL_RESULTS else settings.TOP_K_RESULTS
             
         # Generate query embedding
         query_embedding = generate_embedding(query)

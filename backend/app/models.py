@@ -105,6 +105,7 @@ class SessionResponse(BaseModel):
     session_id: str
     name: str
     created_at: str
+    last_used: Optional[str] = None
     category_map: str
     vector_index_path: Optional[str] = None
     chat_history_path: Optional[str] = None
@@ -114,6 +115,7 @@ class SessionResponse(BaseModel):
             "session_id": "sess-abc123",
             "name": "Machine Learning Notes",
             "created_at": "2025-12-14 10:30:00",
+            "last_used": "2025-12-14 15:45:00",
             "category_map": "notes",
             "vector_index_path": "data/vectors/sess-abc123",
             "chat_history_path": "data/history/sess-abc123.json",
@@ -132,6 +134,27 @@ class SessionUpdate(BaseModel):
         example = {
             "name": "Updated ML Notes",
             "category_map": "qpapers",
+        }
+
+
+class UploadRecord(BaseModel):
+    """Response model for uploaded files per session."""
+
+    upload_id: str
+    session_id: str
+    filename: str
+    category: str
+    chunks_count: Optional[int] = 0
+    created_at: Optional[str] = None
+
+    class Config:
+        example = {
+            "upload_id": "doc-123",
+            "session_id": "sess-abc123",
+            "filename": "notes.pdf",
+            "category": "notes",
+            "chunks_count": 24,
+            "created_at": "2025-12-14 10:45:00",
         }
 
 

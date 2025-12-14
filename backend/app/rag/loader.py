@@ -7,7 +7,6 @@ from app.processors.pdf import process_pdf
 from app.processors.docx import process_docx
 from app.processors.pptx import process_pptx
 from app.processors.ocr import process_image_ocr
-from app.processors.youtube import process_youtube
 from app.rag.chunker import chunk_text
 from app.rag.embedder import generate_embeddings
 from app.rag.retriever import VectorStore
@@ -39,17 +38,14 @@ def clean_text(text: str) -> str:
 
 def detect_file_type(file_or_link: str) -> str:
     """
-    Detect the type of file or link.
+    Detect the type of file.
     
     Args:
-        file_or_link: File path or URL
+        file_or_link: File path
         
     Returns:
-        File type (pdf, docx, pptx, youtube, image, txt)
+        File type (pdf, docx, pptx, image, txt)
     """
-    if "youtube.com" in file_or_link or "youtu.be" in file_or_link:
-        return "youtube"
-    
     ext = os.path.splitext(file_or_link)[1].lower()
     
     if ext == ".pdf":
@@ -66,30 +62,28 @@ def detect_file_type(file_or_link: str) -> str:
         return "unknown"
 
 
-def extract_text(file_or_link: str, file_type: str) -> str:
+def extract_text(file_or_link: str, file_type: str) -> dict:
     """
     Extract text based on file type.
     
     Args:
-        file_or_link: File path or URL
+        file_or_link: File path
         file_type: Type of file
         
     Returns:
-        Extracted text
+        Dictionary with 'text' key
     """
     if file_type == "pdf":
-        return process_pdf(file_or_link)
+        return {"text": process_pdf(file_or_link)}
     elif file_type == "docx":
-        return process_docx(file_or_link)
+        return {"text": process_docx(file_or_link)}
     elif file_type == "pptx":
-        return process_pptx(file_or_link)
+        return {"text": process_pptx(file_or_link)}
     elif file_type == "image":
-        return process_image_ocr(file_or_link)
-    elif file_type == "youtube":
-        return process_youtube(file_or_link)
+        return {"text": process_image_ocr(file_or_link)}
     elif file_type == "txt":
         with open(file_or_link, 'r', encoding='utf-8') as f:
-            return f.read()
+            return {"text": f.read()}
     else:
         raise ValueError(f"Unsupported file type: {file_type}")
 
@@ -117,13 +111,21 @@ def ingest(file_or_link: str, session_id: str, category: str = "notes") -> dict:
     session = db.get_session(session_id)
     if not session:
         raise ValueError(f"Session {session_id} not found")
+
+    # Ensure vector index path exists for this session
+    if not session.get("vector_index_path"):
+        default_vector_path = f"{settings.VECTORS_DIR}/{session_id}"
+        db.update_session(session_id, vector_index_path=default_vector_path)
+        session = db.get_session(session_id)
     
     # Detect file type
     file_type = detect_file_type(file_or_link)
     
     # Extract text
     print(f"Extracting text from {file_type}...")
-    raw_text = extract_text(file_or_link, file_type)
+    extract_result = extract_text(file_or_link, file_type)
+    raw_text = extract_result["text"]
+    source_title = extract_result.get("title", os.path.basename(file_or_link) if os.path.exists(file_or_link) else file_or_link)
     
     # Clean text
     print("Cleaning text...")
@@ -150,7 +152,7 @@ def ingest(file_or_link: str, session_id: str, category: str = "notes") -> dict:
         metadata.append({
             "session_id": session_id,
             "category": category,
-            "source": os.path.basename(file_or_link) if os.path.exists(file_or_link) else file_or_link,
+            "source": source_title,
             "source_full_path": file_or_link,
             "chunk_index": i,
             "page": i + 1,  # Approximate page number
@@ -168,5 +170,6 @@ def ingest(file_or_link: str, session_id: str, category: str = "notes") -> dict:
         "message": "Document ingested successfully",
         "chunks_count": len(chunks),
         "file_type": file_type,
-        "session_id": session_id
+        "session_id": session_id,
+        "source_title": source_title
     }
