@@ -1,0 +1,22 @@
+# Frontend build artifacts
+dist/
+build/
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Git
+.git
+.gitignore
