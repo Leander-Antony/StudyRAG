@@ -1,0 +1,22 @@
+
+Deep Learning Overview
+
+Deep learning is a subset of machine learning that uses artificial neural networks with multiple layers. These networks can automatically learn hierarchical representations of data.
+
+Architecture Components:
+- Input Layer: Receives raw data
+- Hidden Layers: Process and transform data
+- Output Layer: Produces final predictions
+
+Popular Architectures:
+1. Convolutional Neural Networks (CNNs) for image processing
+2. Recurrent Neural Networks (RNNs) for sequential data
+3. Transformers for natural language processing
+
+Training Process:
+- Forward propagation
+- Loss calculation
+- Backpropagation
+- Weight updates using gradient descent
+
+Deep learning has revolutionized computer vision, speech recognition, and language translation.

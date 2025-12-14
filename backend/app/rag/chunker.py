@@ -1,49 +1,72 @@
-"""Text chunking logic."""
+"""Text chunking logic with token-based strategy."""
 
 from typing import List
+import tiktoken
+from app.config import settings
 
 
-def chunk_text(text: str, chunk_size: int = 1000, chunk_overlap: int = 200) -> List[str]:
+def count_tokens(text: str, encoding_name: str = "cl100k_base") -> int:
     """
-    Split text into chunks with overlap.
+    Count tokens in text.
+    
+    Args:
+        text: Input text
+        encoding_name: Tokenizer encoding to use
+        
+    Returns:
+        Token count
+    """
+    encoding = tiktoken.get_encoding(encoding_name)
+    return len(encoding.encode(text))
+
+
+def chunk_text(
+    text: str, 
+    chunk_size: int = None,
+    overlap_percent: float = None
+) -> List[str]:
+    """
+    Split text into chunks based on token count with percentage overlap.
     
     Args:
         text: Input text to chunk
-        chunk_size: Maximum size of each chunk
-        chunk_overlap: Number of characters to overlap between chunks
+        chunk_size: Target token count per chunk (uses config default if None)
+        overlap_percent: Overlap as percentage (uses config default if None)
         
     Returns:
         List of text chunks
     """
+    if chunk_size is None:
+        chunk_size = settings.CHUNK_SIZE
+    if overlap_percent is None:
+        overlap_percent = settings.CHUNK_OVERLAP_PERCENT
+        
     if not text or not text.strip():
         return []
     
-    chunks = []
-    start = 0
-    text_length = len(text)
+    encoding = tiktoken.get_encoding("cl100k_base")
+    tokens = encoding.encode(text)
     
-    while start < text_length:
+    if len(tokens) <= chunk_size:
+        return [text]
+    
+    chunks = []
+    overlap_tokens = int(chunk_size * overlap_percent)
+    start = 0
+    
+    while start < len(tokens):
         end = start + chunk_size
+        chunk_tokens = tokens[start:end]
         
-        # If this is not the last chunk, try to break at sentence boundary
-        if end < text_length:
-            # Look for sentence endings near the chunk boundary
-            sentence_ends = ['. ', '! ', '? ', '\n\n']
-            best_break = end
-            
-            for i in range(max(0, end - 100), min(text_length, end + 100)):
-                for ending in sentence_ends:
-                    if text[i:i+len(ending)] == ending:
-                        best_break = i + len(ending)
-                        break
-            
-            end = best_break
-        
-        chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
+        # Decode tokens back to text
+        chunk_text = encoding.decode(chunk_tokens)
+        chunks.append(chunk_text.strip())
         
         # Move start position with overlap
-        start = end - chunk_overlap if end < text_length else text_length
+        start = end - overlap_tokens
+        
+        # Prevent infinite loop on last chunk
+        if start >= len(tokens):
+            break
     
     return chunks

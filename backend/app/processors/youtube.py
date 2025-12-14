@@ -4,19 +4,23 @@ import yt_dlp
 import whisper
 import os
 import tempfile
+from app.config import settings
 
 
-def process_youtube(url: str, model_name: str = "base") -> str:
+def process_youtube(url: str, model_name: str = None) -> str:
     """
     Extract text from YouTube video using yt-dlp and Whisper.
     
     Args:
         url: YouTube video URL
-        model_name: Whisper model to use (tiny, base, small, medium, large)
+        model_name: Whisper model to use (uses config default if None)
         
     Returns:
         Transcribed text
     """
+    if model_name is None:
+        model_name = settings.WHISPER_MODEL
+        
     # Create temporary directory for audio
     temp_dir = tempfile.mkdtemp()
     audio_path = os.path.join(temp_dir, "audio.mp3")

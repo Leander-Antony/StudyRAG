@@ -12,6 +12,7 @@ from app.rag.chunker import chunk_text
 from app.rag.embedder import generate_embeddings
 from app.rag.retriever import VectorStore
 from app.db import db
+from app.config import settings
 
 
 def clean_text(text: str) -> str:
@@ -44,7 +45,7 @@ def detect_file_type(file_or_link: str) -> str:
         file_or_link: File path or URL
         
     Returns:
-        File type (pdf, docx, pptx, youtube, image)
+        File type (pdf, docx, pptx, youtube, image, txt)
     """
     if "youtube.com" in file_or_link or "youtu.be" in file_or_link:
         return "youtube"
@@ -59,6 +60,8 @@ def detect_file_type(file_or_link: str) -> str:
         return "pptx"
     elif ext in [".png", ".jpg", ".jpeg", ".tiff", ".bmp"]:
         return "image"
+    elif ext == ".txt":
+        return "txt"
     else:
         return "unknown"
 
@@ -84,6 +87,9 @@ def extract_text(file_or_link: str, file_type: str) -> str:
         return process_image_ocr(file_or_link)
     elif file_type == "youtube":
         return process_youtube(file_or_link)
+    elif file_type == "txt":
+        with open(file_or_link, 'r', encoding='utf-8') as f:
+            return f.read()
     else:
         raise ValueError(f"Unsupported file type: {file_type}")
 
@@ -123,9 +129,9 @@ def ingest(file_or_link: str, session_id: str, category: str = "notes") -> dict:
     print("Cleaning text...")
     cleaned_text = clean_text(raw_text)
     
-    # Chunk text
+    # Chunk text with token-based strategy (uses config defaults)
     print("Chunking text...")
-    chunks = chunk_text(cleaned_text, chunk_size=1000, chunk_overlap=200)
+    chunks = chunk_text(cleaned_text)
     
     if not chunks:
         return {
@@ -138,14 +144,17 @@ def ingest(file_or_link: str, session_id: str, category: str = "notes") -> dict:
     print(f"Generating embeddings for {len(chunks)} chunks...")
     embeddings = generate_embeddings(chunks)
     
-    # Prepare metadata
+    # Prepare metadata with source, page/timestamp, and category
     metadata = []
     for i, chunk in enumerate(chunks):
         metadata.append({
             "session_id": session_id,
             "category": category,
-            "source": file_or_link,
+            "source": os.path.basename(file_or_link) if os.path.exists(file_or_link) else file_or_link,
+            "source_full_path": file_or_link,
             "chunk_index": i,
+            "page": i + 1,  # Approximate page number
+            "timestamp": None,  # Can be populated for video timestamps
             "text": chunk
         })
     

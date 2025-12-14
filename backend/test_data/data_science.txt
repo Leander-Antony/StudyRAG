@@ -1,0 +1,30 @@
+
+Data Science Fundamentals
+
+Data science combines statistics, programming, and domain knowledge to extract insights from data.
+
+Key Skills:
+- Statistical analysis and probability
+- Programming (Python, R, SQL)
+- Data visualization
+- Machine learning
+- Communication and storytelling
+
+Data Science Workflow:
+1. Problem Definition
+2. Data Collection
+3. Data Cleaning and Preprocessing
+4. Exploratory Data Analysis
+5. Feature Engineering
+6. Model Building and Training
+7. Model Evaluation
+8. Deployment and Monitoring
+
+Tools and Technologies:
+- Pandas for data manipulation
+- NumPy for numerical computing
+- Scikit-learn for machine learning
+- TensorFlow/PyTorch for deep learning
+- Matplotlib/Seaborn for visualization
+
+Data science drives decision-making in business, healthcare, finance, and scientific research.

@@ -5,18 +5,21 @@ from datetime import datetime
 from typing import Optional, List, Dict
 from contextlib import contextmanager
 import os
+from app.config import settings
 
 
 class Database:
     """SQLite database manager for StudyRAG sessions."""
 
-    def __init__(self, db_path: str = "data/studyrag.db"):
+    def __init__(self, db_path: str = None):
         """
         Initialize database connection.
 
         Args:
-            db_path: Path to SQLite database file
+            db_path: Path to SQLite database file (uses config default if None)
         """
+        if db_path is None:
+            db_path = settings.DATABASE_PATH
         # Ensure data directory exists
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self.db_path = db_path
@@ -174,7 +177,7 @@ class Database:
 
     def delete_session(self, session_id: str) -> bool:
         """
-        Delete a session.
+        Delete a session and its associated files.
 
         Args:
             session_id: Session identifier
@@ -182,11 +185,50 @@ class Database:
         Returns:
             True if deleted, False otherwise
         """
+        # Get session info before deleting
+        session = self.get_session(session_id)
+        if not session:
+            return False
+        
+        # Delete associated files
+        self._cleanup_session_files(session)
+        
+        # Delete from database
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
             conn.commit()
             return cursor.rowcount > 0
+    
+    def _cleanup_session_files(self, session: dict):
+        """
+        Clean up all files associated with a session.
+        
+        Args:
+            session: Session dictionary with file paths
+        """
+        import os
+        
+        # Delete vector index files
+        vector_path = session.get('vector_index_path')
+        if vector_path:
+            # FAISS creates .index and .meta files
+            index_file = f"{vector_path}.index"
+            meta_file = f"{vector_path}.meta"
+            
+            if os.path.exists(index_file):
+                os.remove(index_file)
+                print(f"Deleted vector index: {index_file}")
+            
+            if os.path.exists(meta_file):
+                os.remove(meta_file)
+                print(f"Deleted vector metadata: {meta_file}")
+        
+        # Delete chat history file
+        history_path = session.get('chat_history_path')
+        if history_path and os.path.exists(history_path):
+            os.remove(history_path)
+            print(f"Deleted chat history: {history_path}")
 
     def get_sessions_by_category(self, category_map: str) -> List[Dict]:
         """

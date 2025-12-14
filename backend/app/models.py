@@ -10,11 +10,13 @@ class MessageRequest(BaseModel):
 
     message: str = Field(..., min_length=1, max_length=5000)
     session_id: Optional[str] = None
+    mode: Optional[str] = Field(default="chat", description="Prompt mode: chat, summary, points, flashcards, teacher, exam")
 
     class Config:
         example = {
             "message": "What is machine learning?",
             "session_id": "user-123",
+            "mode": "chat",
         }
 
 
@@ -130,4 +132,17 @@ class SessionUpdate(BaseModel):
         example = {
             "name": "Updated ML Notes",
             "category_map": "qpapers",
+        }
+
+
+class QuickActionRequest(BaseModel):
+    """Request model for quick action endpoints."""
+
+    session_id: str = Field(..., description="Session identifier")
+    topic: Optional[str] = Field(None, description="Specific topic to focus on (optional, uses all context if not provided)")
+
+    class Config:
+        example = {
+            "session_id": "sess-abc123",
+            "topic": "machine learning algorithms",
         }

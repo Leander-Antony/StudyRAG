@@ -15,6 +15,7 @@ from app.models import (
     SessionCreate,
     SessionResponse,
     SessionUpdate,
+    QuickActionRequest,
 )
 from app.rag.chat import ChatBot
 from app.config import Settings
@@ -67,7 +68,7 @@ async def health_check():
     """Health check endpoint."""
     return HealthResponse(
         status="healthy",
-        model="llama3:latest",
+        model=settings.OLLAMA_MODEL,
         message="StudyRAG is running and ready",
     )
 
@@ -75,23 +76,41 @@ async def health_check():
 @app.post("/chat", response_model=MessageResponse, tags=["Chat"])
 async def chat(request: MessageRequest):
     """
-    Send a message to the chatbot.
+    Send a message to the chatbot with RAG support.
 
     - **message**: User's message (required, 1-5000 characters)
-    - **session_id**: Optional session identifier for conversation tracking
+    - **session_id**: Session identifier for conversation tracking (required for RAG)
+    - **mode**: Prompt mode - chat, summary, points, flashcards, teacher, exam (default: chat)
     """
     try:
-        # Generate session ID if not provided
-        session_id = request.session_id or str(uuid.uuid4())
+        # Session ID is required for RAG
+        if not request.session_id:
+            raise HTTPException(status_code=400, detail="session_id is required for RAG chat")
+        
+        session_id = request.session_id
+        mode = request.mode or "chat"
+        
+        # Validate mode
+        valid_modes = ["chat", "summary", "points", "flashcards", "teacher", "exam"]
+        if mode not in valid_modes:
+            raise HTTPException(status_code=400, detail=f"Invalid mode. Must be one of: {', '.join(valid_modes)}")
+        
+        # Get session from database
+        session = db.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
-        # Create or get chat session
+        # Create or get chat session with RAG enabled
         if session_id not in chat_sessions:
-            chat_sessions[session_id] = ChatBot(model="llama3:latest")
+            chat_sessions[session_id] = ChatBot(
+                vector_store_path=session['vector_index_path'],
+                history_path=session['chat_history_path']
+            )
 
         bot = chat_sessions[session_id]
 
-        # Get response from chatbot
-        response_text = bot.chat(request.message)
+        # Get response from chatbot with RAG and specified mode
+        response_text = bot.chat(request.message, use_rag=True, mode=mode)
 
         return MessageResponse(
             response=response_text,
@@ -99,6 +118,8 @@ async def chat(request: MessageRequest):
             timestamp=__import__("datetime").datetime.now(),
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Chat error: {str(e)}")
 
@@ -207,16 +228,20 @@ async def get_chat_history(session_id: str):
 
 @app.delete("/sessions/{session_id}", tags=["Chat"])
 async def clear_session(session_id: str):
-    """Clear conversation history and end session."""
+    """
+    Clear conversation history for a session (does not delete the session).
+    
+    This only clears the chat messages, keeping the session and vector data intact.
+    """
     try:
         if session_id not in chat_sessions:
-            raise HTTPException(status_code=404, detail="Session not found")
+            raise HTTPException(status_code=404, detail="Session not found in memory")
 
         bot = chat_sessions[session_id]
         bot.clear_history()
         del chat_sessions[session_id]
 
-        return {"message": f"Session {session_id} cleared and ended"}
+        return {"message": f"Chat history cleared for session {session_id}"}
 
     except HTTPException:
         raise
@@ -238,9 +263,9 @@ async def create_session(session: SessionCreate):
     try:
         session_id = f"sess-{uuid.uuid4()}"
         
-        # Set default paths if not provided
-        vector_path = session.vector_index_path or f"data/vectors/{session_id}"
-        history_path = session.chat_history_path or f"data/history/{session_id}.json"
+        # Set default paths if not provided (using config directories)
+        vector_path = session.vector_index_path or f"{settings.VECTORS_DIR}/{session_id}.json"
+        history_path = session.chat_history_path or f"{settings.HISTORY_DIR}/{session_id}.json"
         
         result = db.create_session(
             session_id=session_id,
@@ -309,17 +334,35 @@ async def update_session(session_id: str, update_data: SessionUpdate):
 
 @app.delete("/api/sessions/{session_id}", tags=["Sessions"])
 async def delete_session(session_id: str):
-    """Delete a session permanently."""
+    """
+    Delete a session permanently.
+    
+    This will remove:
+    - Session record from database
+    - Vector index files (.index and .meta)
+    - Chat history file
+    - In-memory chat bot instance
+    """
     try:
-        deleted = db.delete_session(session_id)
-        if not deleted:
+        # Get session info first
+        session = db.get_session(session_id)
+        if not session:
             raise HTTPException(status_code=404, detail="Session not found")
         
-        # Also clear from memory if active
+        # Delete session and all associated files
+        deleted = db.delete_session(session_id)
+        
+        # Clear from memory if active
         if session_id in chat_sessions:
             del chat_sessions[session_id]
         
-        return {"message": f"Session {session_id} deleted successfully"}
+        return {
+            "message": f"Session {session_id} and all associated data deleted successfully",
+            "deleted_files": {
+                "vector_index": session['vector_index_path'],
+                "chat_history": session['chat_history_path']
+            }
+        }
     
     except HTTPException:
         raise
@@ -345,6 +388,175 @@ async def get_sessions_by_category(category: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching sessions: {str(e)}")
+
+
+# Quick Action Endpoints (1-click intelligence)
+@app.post("/explain-simple", response_model=MessageResponse, tags=["Quick Actions"])
+async def explain_simple(request: QuickActionRequest):
+    """
+    Get a simple, beginner-friendly explanation of the content.
+    
+    Uses teacher mode to provide detailed, pedagogical explanations.
+    
+    - **session_id**: Session identifier (required)
+    - **topic**: Specific topic to explain (optional, uses all context if not provided)
+    """
+    try:
+        session = db.get_session(request.session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail=f"Session {request.session_id} not found")
+        
+        # Create or get chat session
+        if request.session_id not in chat_sessions:
+            chat_sessions[request.session_id] = ChatBot(
+                vector_store_path=session['vector_index_path'],
+                history_path=session['chat_history_path']
+            )
+        
+        bot = chat_sessions[request.session_id]
+        
+        # Generate query
+        query = request.topic if request.topic else "Explain this topic in simple terms"
+        
+        # Get response with teacher mode
+        response_text = bot.chat(query, use_rag=True, mode="teacher")
+        
+        return MessageResponse(
+            response=response_text,
+            session_id=request.session_id,
+            timestamp=__import__("datetime").datetime.now(),
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+
+@app.post("/important-points", response_model=MessageResponse, tags=["Quick Actions"])
+async def important_points(request: QuickActionRequest):
+    """
+    Extract the most important points from the content.
+    
+    Uses points mode to identify key information.
+    
+    - **session_id**: Session identifier (required)
+    - **topic**: Specific topic to extract points from (optional)
+    """
+    try:
+        session = db.get_session(request.session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail=f"Session {request.session_id} not found")
+        
+        # Create or get chat session
+        if request.session_id not in chat_sessions:
+            chat_sessions[request.session_id] = ChatBot(
+                vector_store_path=session['vector_index_path'],
+                history_path=session['chat_history_path']
+            )
+        
+        bot = chat_sessions[request.session_id]
+        
+        # Generate query
+        query = f"What are the important points about {request.topic}" if request.topic else "What are the most important points"
+        
+        # Get response with points mode
+        response_text = bot.chat(query, use_rag=True, mode="points")
+        
+        return MessageResponse(
+            response=response_text,
+            session_id=request.session_id,
+            timestamp=__import__("datetime").datetime.now(),
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+
+@app.post("/revise-fast", response_model=MessageResponse, tags=["Quick Actions"])
+async def revise_fast(request: QuickActionRequest):
+    """
+    Get a quick summary for fast revision.
+    
+    Uses summary mode to provide concise overviews.
+    
+    - **session_id**: Session identifier (required)
+    - **topic**: Specific topic to summarize (optional)
+    """
+    try:
+        session = db.get_session(request.session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail=f"Session {request.session_id} not found")
+        
+        # Create or get chat session
+        if request.session_id not in chat_sessions:
+            chat_sessions[request.session_id] = ChatBot(
+                vector_store_path=session['vector_index_path'],
+                history_path=session['chat_history_path']
+            )
+        
+        bot = chat_sessions[request.session_id]
+        
+        # Generate query
+        query = f"Summarize {request.topic}" if request.topic else "Provide a summary of the key concepts"
+        
+        # Get response with summary mode
+        response_text = bot.chat(query, use_rag=True, mode="summary")
+        
+        return MessageResponse(
+            response=response_text,
+            session_id=request.session_id,
+            timestamp=__import__("datetime").datetime.now(),
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+
+@app.post("/ask-questions", response_model=MessageResponse, tags=["Quick Actions"])
+async def ask_questions(request: QuickActionRequest):
+    """
+    Generate exam questions based on the content.
+    
+    Uses exam mode to create comprehensive test questions.
+    
+    - **session_id**: Session identifier (required)
+    - **topic**: Specific topic to generate questions for (optional)
+    """
+    try:
+        session = db.get_session(request.session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail=f"Session {request.session_id} not found")
+        
+        # Create or get chat session
+        if request.session_id not in chat_sessions:
+            chat_sessions[request.session_id] = ChatBot(
+                vector_store_path=session['vector_index_path'],
+                history_path=session['chat_history_path']
+            )
+        
+        bot = chat_sessions[request.session_id]
+        
+        # Generate query
+        query = f"Generate exam questions about {request.topic}" if request.topic else "Generate exam questions based on the content"
+        
+        # Get response with exam mode
+        response_text = bot.chat(query, use_rag=True, mode="exam")
+        
+        return MessageResponse(
+            response=response_text,
+            session_id=request.session_id,
+            timestamp=__import__("datetime").datetime.now(),
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 
 if __name__ == "__main__":
