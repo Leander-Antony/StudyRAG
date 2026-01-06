@@ -25,8 +25,13 @@ const API_BASE = (() => {
     const isFile = typeof window !== 'undefined' && window.location.protocol === 'file:';
     if (isFile) return 'http://localhost:8000';
 
+    // When served by nginx (port 80), use relative URLs so nginx can proxy
+    const { protocol, hostname, port } = window.location;
+    if (port === '80' || port === '') {
+        return '';  // Use relative URLs, nginx will proxy
+    }
+
     // Otherwise, use same host with backend port 8000
-    const { protocol, hostname } = window.location;
     return `${protocol}//${hostname || 'localhost'}:8000`;
 })();
 

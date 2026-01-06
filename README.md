@@ -46,45 +46,13 @@ A comprehensive Retrieval-Augmented Generation (RAG) system for intelligent docu
 
 ```
 StudyRAG/
-├── frontend/              # Web UI (HTML/CSS/JS)
-│   ├── index.html        # Session management page
-│   ├── chat.html         # Chat interface
-│   ├── style.css         # Dark theme styling
-│   ├── js/
-│   │   ├── api.js        # API client
-│   │   ├── chat.js       # Chat interactions
-│   │   └── sessions.js   # Session management
-│   ├── Dockerfile        # Frontend container
-│   └── nginx.conf        # Nginx reverse proxy config
-│
-├── backend/              # FastAPI application
+├── frontend/          # Web UI (Nginx + HTML/CSS/JS)
+├── backend/           # FastAPI + RAG pipeline
 │   ├── app/
-│   │   ├── main.py       # FastAPI routes
-│   │   ├── config.py     # Configuration settings
-│   │   ├── db.py         # SQLite database layer
-│   │   ├── models.py     # Pydantic models
-│   │   ├── processors/   # Document processing
-│   │   │   ├── pdf.py
-│   │   │   ├── docx.py
-│   │   │   ├── pptx.py
-│   │   │   └── ocr.py
-│   │   └── rag/          # RAG pipeline
-│   │       ├── chat.py   # Chatbot logic
-│   │       ├── loader.py # Document ingestion
-│   │       ├── chunker.py # Text chunking
-│   │       ├── embedder.py # Embedding generation
-│   │       ├── retriever.py # Vector search
-│   │       └── prompts.py # Mode-based prompts
-│   ├── data/             # Data storage
-│   │   ├── vectors/      # FAISS indices
-│   │   ├── history/      # Chat histories
-│   │   └── studyrag.db   # SQLite database
-│   ├── requirements.txt
-│   ├── Dockerfile
-│   └── .dockerignore
-│
-├── docker-compose.yml    # Complete stack orchestration
-└── README.md
+│   │   ├── processors/  # PDF, DOCX, PPTX, OCR
+│   │   └── rag/         # Chunking, embeddings, retrieval
+│   └── data/          # Vectors, history, SQLite DB
+└── docker-compose.yml
 ```
 
 ## 📋 Prerequisites
@@ -184,181 +152,32 @@ MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # 100MB
 SUPPORTED_FORMATS = ["pdf", "docx", "pptx", "txt", "jpg", "png", "jpeg"]
 ```
 
-## 📡 API Endpoints
+## 📡 API Documentation
 
-### Sessions
-- `GET /sessions` - List all sessions
-- `POST /sessions` - Create new session
-- `GET /sessions/{id}` - Get session details
-- `DELETE /sessions/{id}` - Delete session
+Complete API documentation available at: `http://localhost:8000/docs` (Swagger UI)
 
-### Documents
-- `POST /upload` - Upload document
-- `GET /sessions/{id}/files` - List uploaded files
-- `DELETE /sessions/{id}/files/{file_id}` - Delete file
+##  Data Storage
 
-### Chat
-- `POST /chat` - Send message (RAG-enabled)
-- `GET /sessions/{id}/history` - Get chat history
-
-### System
-- `GET /docs` - Swagger API documentation
-- `GET /health` - Health check
-
-## 🐳 Docker Hub
-
-Pre-built images available on Docker Hub:
-
-```bash
-# Using Docker Hub images
-docker pull zorocancode/studyrag-backend:latest
-docker pull zorocancode/studyrag-frontend:latest
-
-# Run with docker-compose
-docker-compose up -d
-```
-
-## 📊 Data Storage
-
-- **SQLite Database** (`data/studyrag.db`)
-  - Sessions metadata
-  - Upload records
-  - User preferences
-
-- **FAISS Indices** (`data/vectors/`)
-  - Per-session vector embeddings
-  - Binary index files (.index)
-  - Metadata pickles (.meta)
-
-- **Chat History** (`data/history/`)
-  - JSON files per session
-  - Conversation records with sources
+- `data/studyrag.db` - SQLite database (sessions, uploads, metadata)
+- `data/vectors/` - FAISS vector indices per session
+- `data/history/` - JSON chat history files
 
 ## 🔧 Troubleshooting
 
-### Backend Issues
-
-**CUDA not available:**
+**Models not loading:** Pull Ollama models first:
 ```bash
-# Reinstall PyTorch with CUDA support
-pip uninstall torch torchvision torchaudio -y
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+docker exec ollama-server ollama pull llama3:latest
+docker exec ollama-server ollama pull nomic-embed-text
 ```
 
-**Ollama connection error:**
-- Ensure Ollama is running: `ollama serve`
-- Check OLLAMA_BASE_URL in config
-- Verify network connectivity in Docker
+**Connection errors:** Check services with `docker-compose logs -f`
 
-**Out of memory:**
-- Reduce CHUNK_SIZE
-- Use smaller WHISPER_MODEL (tiny or base)
-- Reduce MAX_UPLOAD_SIZE
+**Out of memory:** Reduce `CHUNK_SIZE` or use smaller `WHISPER_MODEL` in config
 
-### Frontend Issues
+## 🎯 Usage
 
-**API calls failing:**
-- Check backend is running on port 8000
-- Verify nginx proxy config (frontend/nginx.conf)
-- Check CORS headers in FastAPI
+1. **Create Session** → Open `http://localhost` and create a new study session
+2. **Upload Documents** → Upload PDF/DOCX/PPTX files (automatically processed)
+3. **Chat** → Ask questions, select modes (Chat/Explain/Summary/etc), get AI responses with sources
+4. **Export** → Download conversation as PDF
 
-**PDF export not working:**
-- Ensure html2pdf library is loaded
-- Check browser console for errors
-- Try a different browser
-
-## 🎯 Usage Examples
-
-### 1. Create a Study Session
-1. Open http://localhost
-2. Click "Create Session"
-3. Enter session name and subject
-
-### 2. Upload Documents
-1. Navigate to session
-2. Click "📎 Upload"
-3. Select PDF, DOCX, or image files
-4. Documents are automatically processed
-
-### 3. Ask Questions
-1. Type your question in the chat
-2. Select a mode (Chat, Explain, Summary, etc.)
-3. AI searches documents and provides answers with sources
-
-### 4. Export Conversation
-1. Click "📄 Export PDF"
-2. Conversation is downloaded with formatting
-
-## 🌐 Environment Variables
-
-Create `.env` file in backend/:
-
-```env
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3
-WHISPER_DEVICE=cuda
-DEBUG=False
-```
-
-## 📈 Performance Tips
-
-1. **Use GPU for Whisper:** Set `WHISPER_DEVICE=cuda` (requires CUDA PyTorch)
-2. **Adjust chunk size:** Larger chunks = faster but less precise
-3. **Limit TOP_K_RESULTS:** Smaller values = faster responses
-4. **Use medium Whisper model:** Balance between speed and accuracy
-5. **Enable GZIP compression:** Already configured in nginx
-
-## 🐛 Known Limitations
-
-- YouTube ingestion removed (use alternative tools)
-- Single Ollama model per deployment
-- Vector indices stored locally (not distributed)
-- SQLite database (suitable for small to medium deployments)
-
-## 🚀 Future Enhancements
-
-- [ ] Multi-LLM support (GPT-4, Claude)
-- [ ] Distributed vector store (Weaviate, Milvus)
-- [ ] Real-time collaboration
-- [ ] Advanced search filters
-- [ ] Custom prompt templates
-- [ ] Usage analytics dashboard
-- [ ] Multiple language support
-- [ ] Fine-tuning on custom datasets
-
-## 📝 License
-
-MIT License - See LICENSE file for details
-
-## 👤 Author
-
-**zorocancode** - [Docker Hub](https://hub.docker.com/r/zorocancode)
-
-## 🤝 Contributing
-
-Contributions welcome! Please:
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open Pull Request
-
-## 📞 Support
-
-For issues and questions:
-- Check [Troubleshooting](#-troubleshooting) section
-- Review API docs at `/docs` endpoint
-- Check Docker logs: `docker-compose logs -f`
-
-## 🙏 Acknowledgments
-
-- OpenAI Whisper for transcription
-- Ollama for local LLM inference
-- LangChain for RAG framework
-- FAISS for vector similarity search
-- FastAPI for the backend framework
-- Nginx for reverse proxy
-
----
-
-**Happy Learning! 📚**

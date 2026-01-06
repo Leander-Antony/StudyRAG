@@ -236,14 +236,34 @@ async function sendMessage() {
     addUserMessage(message);
     messageInput.value = '';
     sendBtn.disabled = true;
+    
+    // Show typing indicator
+    const typingDiv = document.createElement('div');
+    typingDiv.className = 'message assistant typing';
+    typingDiv.innerHTML = '<p>Thinking...</p>';
+    typingDiv.id = 'typing-indicator';
+    chatMessages.appendChild(typingDiv);
+    scrollToBottom();
 
     try {
         // Send to API
         const response = await StudyRAGAPI.chat(currentSessionId, message, currentMode);
         
+        // Remove typing indicator
+        const typing = document.getElementById('typing-indicator');
+        if (typing) typing.remove();
+        
         // Add assistant response
-        addAssistantMessage(response.response);
+        if (response && response.response) {
+            addAssistantMessage(response.response);
+        } else {
+            addSystemMessage('Error: No response received');
+        }
     } catch (error) {
+        // Remove typing indicator
+        const typing = document.getElementById('typing-indicator');
+        if (typing) typing.remove();
+        
         addSystemMessage(`Error: ${error.message}`);
     } finally {
         sendBtn.disabled = false;

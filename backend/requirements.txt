@@ -2,7 +2,6 @@ acres==0.5.0
 aiohappyeyeballs==2.6.1
 aiohttp==3.13.2
 aiosignal==1.4.0
-annotated-doc==0.0.4
 annotated-types==0.7.0
 anyio==4.12.0
 attrs==25.4.0
@@ -18,7 +17,6 @@ etelemetry==0.3.1
 faiss-cpu==1.13.1
 fastapi==0.124.4
 filelock==3.20.0
-fitz==0.0.1.dev2
 frozenlist==1.8.0
 fsspec==2025.12.0
 greenlet==3.3.0
@@ -71,7 +69,7 @@ pydantic==2.12.5
 pydantic-settings==2.12.0
 pydantic_core==2.41.5
 pydot==4.0.1
-PyMuPDF==1.26.7
+PyMuPDF
 pyparsing==3.2.5
 pytesseract==0.3.13
 python-dateutil==2.9.0.post0
@@ -82,6 +80,7 @@ python-pptx==1.0.2
 pytz==2025.2
 pyxnat==1.6.4
 PyYAML==6.0.3
+PyMuPDF==1.22.5
 rdflib==7.5.0
 regex==2025.11.3
 requests==2.32.5
